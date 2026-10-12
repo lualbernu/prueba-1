@@ -400,7 +400,6 @@ pdv_disponibles = {
     "QUIP":"QUIPAMA",
     "RAQU":"RAQUIRA",
     "SAMA":"SAMACA",
-    "SANT":"SANTANA",
     "SOGA":"SOGAMOSO",
     "STAS":"SANTA SOFIA",
     "TIBA":"TIBANA",
@@ -1093,22 +1092,25 @@ with tab_historial:
                     mime="text/csv",
                 )
 
-                # --- Tarjetas con barra de progreso por asesor ---
+                # --- Tarjetas con barra de progreso por asesor (4 columnas) ---
                 st.markdown("#### Progreso por Asesor")
+                asesores_metas = []
                 for m in metas_todas:
                     cedula = str(m.get("cedula_vendedor") or "").strip()
                     nombre = dict_asesores.get(cedula, cedula)
                     av = avance_por_asesor.get(cedula, {"pospago": 0, "accesos": 0, "hogar": 0, "terminales": 0, "claro_up": 0})
-                    st.markdown(f"<b>{nombre} (CC: {cedula})</b>", unsafe_allow_html=True)
-                    with st.container(border=True):
-                        c1, c2 = st.columns(2)
-                        with c1:
-                            mostrar_meta("Postpago", av["pospago"], float(m.get("pospago") or 0))
-                            mostrar_meta("Accesos", av["accesos"], float(m.get("accesos") or 0))
-                            mostrar_meta("Claro Up", av["claro_up"], float(m.get("claro_up") or 0))
-                        with c2:
-                            mostrar_meta("Hogar", av["hogar"], float(m.get("hogar") or 0))
-                            mostrar_meta("Terminales", av["terminales"], float(m.get("terminales") or 0), es_dinero=True)
+                    asesores_metas.append((nombre, cedula, av, m))
+                for i in range(0, len(asesores_metas), 4):
+                    cols = st.columns(4)
+                    for col, (nombre, cedula, av, m) in zip(cols, asesores_metas[i:i + 4]):
+                        with col:
+                            st.markdown(f"<b>{nombre} (CC: {cedula})</b>", unsafe_allow_html=True)
+                            with st.container(border=True):
+                                mostrar_meta("Postpago", av["pospago"], float(m.get("pospago") or 0))
+                                mostrar_meta("Accesos", av["accesos"], float(m.get("accesos") or 0))
+                                mostrar_meta("Claro Up", av["claro_up"], float(m.get("claro_up") or 0))
+                                mostrar_meta("Hogar", av["hogar"], float(m.get("hogar") or 0))
+                                mostrar_meta("Terminales", av["terminales"], float(m.get("terminales") or 0), es_dinero=True)
             else:
                 st.info("📭 Aún no hay metas cargadas para este mes.")
 
