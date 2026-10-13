@@ -93,10 +93,8 @@ def calcular_estado_facturacion(datos_historial, hoy, df_fact, df_post):
         Facturado_Postpago.csv (df_post), columna iden_cliente.
       - Resto de ventas -> se cruzan por IMEI contra FacturadoParaCruce.csv
         (df_fact), que ya excluye el postpago real. No hay paso por cédula.
-      - Ventas Sim card -> se cruzan por ICCID contra la columna imei de las
-        filas tipo AMIGO SIM de FacturadoParaCruce.csv (que almacena ICCIDs).
-      - Las ventas tipo "Tecnologia" y "Hogar" se excluyen del reporte:
-        se facturan por otra plataforma.
+      - Las ventas tipo "Sim card", "Tecnologia" y "Hogar" se excluyen del
+        reporte: no se cruzan en esta tabla.
 
     Devuelve un DataFrame con columnas:
       Cédula Vendedor, Vendedor, Tipo, Fecha, Cliente, Cédula Cliente,
@@ -108,8 +106,6 @@ def calcular_estado_facturacion(datos_historial, hoy, df_fact, df_post):
 
     set_imeis_fact = set(df_fact["imei_norm"]) if df_fact is not None else set()
     mapa_grupo_imei = dict(zip(df_fact["imei_norm"], df_fact["grupo_norm"])) if df_fact is not None else {}
-    df_sim = df_fact[df_fact["tipo_norm"] == "AMIGO SIM"] if df_fact is not None else pd.DataFrame()
-    set_iccids_fact = set(df_sim["imei_norm"]) if not df_sim.empty else set()
     set_cedulas_post = set(df_post["cedula_norm"]) if df_post is not None and not df_post.empty else set()
     mapa_grupo_post = dict(zip(df_post["cedula_norm"], ["POSTPAGO"] * len(df_post))) if df_post is not None and not df_post.empty else {}
 
@@ -118,7 +114,7 @@ def calcular_estado_facturacion(datos_historial, hoy, df_fact, df_post):
         if isinstance(v.get("fecha_venta"), datetime.date)
         and v["fecha_venta"].year == hoy.year
         and v["fecha_venta"].month == hoy.month
-        and normalizar(v.get("tipo_venta")) not in ("TECNOLOGIA", "HOGAR")
+        and normalizar(v.get("tipo_venta")) not in ("SIM CARD", "TECNOLOGIA", "HOGAR")
     ]
 
     filas = []
@@ -139,9 +135,6 @@ def calcular_estado_facturacion(datos_historial, hoy, df_fact, df_post):
             if imei_v and imei_v in set_imeis_fact:
                 facturado = "SÍ"
                 grupo_fact = mapa_grupo_imei.get(imei_v, "")
-            elif tipo_v == "SIM CARD" and iccid_v and iccid_v in set_iccids_fact:
-                facturado = "SÍ"
-                grupo_fact = "AMIGO SIM"
 
         filas.append({
             "Cédula Vendedor": v.get("cedula_vendedor", ""),
