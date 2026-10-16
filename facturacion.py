@@ -150,3 +150,56 @@ def calcular_estado_facturacion(datos_historial, hoy, df_fact, df_post):
         })
 
     return pd.DataFrame(filas)
+
+
+def calcular_estado_facturacion_simcard(datos_historial, hoy, df_fact):
+    """Lista aparte las ventas tipo "Sim card" del mes.
+
+    El estado de facturación se determina cruzando el ICCID de la venta contra
+    la columna imei de las filas tipo AMIGO SIM de FacturadoParaCruce.csv (que
+    almacena ICCIDs). Si no hay CSV cargado, la columna Facturado queda vacía.
+
+    Devuelve un DataFrame con columnas:
+      Cédula Vendedor, Vendedor, Tipo, Fecha, Cliente, Cédula Cliente,
+      ICCID, Trámite, Paquete Bienvenida, Grupo Factura, Facturado (SÍ/NO).
+    """
+    hay_facturas = df_fact is not None and not df_fact.empty
+    df_sim = df_fact[df_fact["tipo_norm"] == "AMIGO SIM"] if hay_facturas else pd.DataFrame()
+    set_iccids_fact = set(df_sim["imei_norm"]) if not df_sim.empty else set()
+
+    ventas_mes = [
+        v for v in datos_historial
+        if isinstance(v.get("fecha_venta"), datetime.date)
+        and v["fecha_venta"].year == hoy.year
+        and v["fecha_venta"].month == hoy.month
+        and normalizar(v.get("tipo_venta")) == "SIM CARD"
+    ]
+
+    filas = []
+    for v in ventas_mes:
+        iccid_v = normalizar(v.get("iccid"))
+        if not hay_facturas:
+            facturado = ""
+            grupo_fact = ""
+        elif iccid_v and iccid_v in set_iccids_fact:
+            facturado = "SÍ"
+            grupo_fact = "AMIGO SIM"
+        else:
+            facturado = "NO"
+            grupo_fact = ""
+
+        filas.append({
+            "Cédula Vendedor": v.get("cedula_vendedor", ""),
+            "Vendedor": v.get("nombre_vendedor", ""),
+            "Tipo": v.get("tipo_venta", ""),
+            "Fecha": v.get("fecha_venta", ""),
+            "Cliente": v.get("nombre_cliente", ""),
+            "Cédula Cliente": normalizar(v.get("nro_documento")),
+            "ICCID": iccid_v,
+            "Trámite": v.get("tramite", ""),
+            "Paquete Bienvenida": v.get("paquete_bienvenida", ""),
+            "Grupo Factura": grupo_fact,
+            "Facturado": facturado,
+        })
+
+    return pd.DataFrame(filas)

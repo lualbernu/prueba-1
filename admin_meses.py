@@ -324,7 +324,7 @@ def _estado_facturacion_pendiente(ventas_mes, anio, mes):
     df_facturacion = calcular_estado_facturacion(ventas_mes, fecha_ref, df_fact, df_post)
     st.caption(
         "Solo ventas sin facturar según los CSV de facturación del proyecto. "
-        "Tecnología y Hogar se excluyen (se facturan por otra plataforma)."
+        "Sim card, Tecnología y Hogar se excluyen."
     )
 
     pendientes = df_facturacion[df_facturacion["Facturado"] == "NO"] if not df_facturacion.empty else df_facturacion
