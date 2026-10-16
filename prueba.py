@@ -4,7 +4,7 @@ import datetime
 import pandas as pd
 import os
 from supabase import create_client
-from facturacion import cargar_facturas_csv, cargar_facturas_postpago, calcular_estado_facturacion, cargar_fecha_corte
+from facturacion import cargar_facturas_csv, cargar_facturas_postpago, calcular_estado_facturacion, calcular_estado_facturacion_simcard, cargar_fecha_corte
 
 def _get_app_config(clave, valor_default):
     try:
@@ -14,6 +14,7 @@ def _get_app_config(clave, valor_default):
 
 TABLA_VENTAS = _get_app_config("tabla_ventas", "ventas")
 CEDULAS_ADMIN = list(_get_app_config("cedulas_admin", []))
+CEDULAS_CONTABILIDAD = [str(c).strip() for c in _get_app_config("cedulas_contabilidad", [])]
 CEDULA_SUPERUSUARIO = str(_get_app_config("cedula_superusuario", "")).strip()
 
 # ================= CONFIGURACIÓN DE FUNCIONES AUXILIARES =================
@@ -443,12 +444,39 @@ if st.session_state.usuario_logueado is None:
                 st.error("⚠️ La cédula solo debe contener números")
             elif len(cedula) < 6:
                 st.error("⚠️ Ingrese una cédula válida (mínimo 6 dígitos)")
-            elif cedula not in dict_asesores:
+            elif cedula not in dict_asesores and cedula not in CEDULAS_CONTABILIDAD:
                 st.error(f"❌ La cédula **{cedula}** no está registrada como vendedor activo. Verifique e intente de nuevo.")
             else:
                 st.session_state.usuario_logueado = cedula
-                st.session_state.nombre_vendedor = dict_asesores[cedula]
+                st.session_state.nombre_vendedor = dict_asesores.get(cedula, "Contabilidad")
                 st.rerun()
+    st.stop()
+
+# ================= PANTALLA 1.5: MÓDULO DE CONTABILIDAD (solo consulta) =================
+if st.session_state.usuario_logueado in CEDULAS_CONTABILIDAD:
+    st.markdown(f'<span class="user-badge">🧾 Contabilidad (CC: {st.session_state.usuario_logueado})</span>', unsafe_allow_html=True)
+    if supabase is None:
+        st.warning(
+            "⚠️ **Supabase no configurado.** No se pueden generar los reportes "
+            f"sin conexión. Motivo: `{motivo_supabase}`"
+        )
+    else:
+        try:
+            from contabilidad import render_contabilidad
+        except ImportError:
+            st.error("❌ No se encontró el módulo `contabilidad.py`.")
+        else:
+            render_contabilidad(
+                supabase, dict_asesores, TABLA_VENTAS,
+                calcular_avance_por_asesor,
+            )
+    st.markdown("---")
+    if st.button("🚪 Cerrar Sesión", use_container_width=True):
+        st.session_state.usuario_logueado = None
+        st.session_state.nombre_vendedor = None
+        st.session_state.pdv_seleccionado = None
+        st.session_state.meta_volante_visto = False
+        st.rerun()
     st.stop()
 
 # ================= PANTALLA 2: SELECCIÓN DE PDV =================
@@ -1212,6 +1240,14 @@ with tab_historial:
                     else:
                         df_vis = df_facturacion
                     st.dataframe(df_vis, use_container_width=True, hide_index=True)
+
+            # ===== SIM CARD: detalle aparte =====
+            df_simcard = calcular_estado_facturacion_simcard(datos_historial, hoy, df_fact)
+            st.markdown("##### 📶 Sim card — Detalle del Mes")
+            if df_simcard.empty:
+                st.caption("No hay ventas de Sim card registradas en el mes actual.")
+            else:
+                st.dataframe(df_simcard, use_container_width=True, hide_index=True)
 
     st.markdown("---")
     
