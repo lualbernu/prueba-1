@@ -401,6 +401,7 @@ pdv_disponibles = {
     "QUIP":"QUIPAMA",
     "RAQU":"RAQUIRA",
     "SAMA":"SAMACA",
+    "SANT":"SANTANA",
     "SOGA":"SOGAMOSO",
     "STAS":"SANTA SOFIA",
     "TIBA":"TIBANA",
