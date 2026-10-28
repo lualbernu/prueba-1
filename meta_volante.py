@@ -6,82 +6,66 @@ import streamlit as st
 # Este archivo es un módulo independiente de corta duración: al terminar la
 # campaña se elimina (detengase con app.py). La configuración está hardcodeada
 # aquí para que borrar el archivo elimine todo el tracking.
+#
+# Campaña vigente: puntos acumulados por asesor, del 26 al 31 de octubre de 2026.
+# El premio es el del nivel más alto alcanzado (no acumulativo).
 
-NOMBRE_CAMPANA = "¡Juntos logramos más!"
-SUBTITULO_CAMPANA = "¡TU ESFUERZO TIENE PREMIO!"
-
-FECHA_INICIO = datetime.date(2026, 9, 22)
-FECHA_FIN = datetime.date(2026, 9, 27)
-MES_CAMPANA = "Septiembre"
+NOMBRE_CAMPANA = "Meta Volante de Puntos"
+SUBTITULO_CAMPANA = "¡SUMA PUNTOS Y GANA!"
+FECHA_INICIO = datetime.date(2026, 10, 26)
+FECHA_FIN = datetime.date(2026, 10, 31)
+MES_CAMPANA = "Octubre"
 
 REGLA_CIERRE = (
-    "Termina por ítem apenas el primer punto de venta logre la meta máxima de cada uno."
+    "El premio corresponde al nivel más alto alcanzado según los puntos acumulados "
+    "(no acumulativo)."
 )
 
-# Cada categoría: clave, nombre, unidad de medida y niveles (meta -> premio)
-CATEGORIAS = [
-    {
-        "clave": "credismart",
-        "nombre": "Claro - Credismart",
-        "unidad": "activaciones",
-        "niveles": [
-            {"meta": 5, "premio": 100000},
-            {"meta": 7, "premio": 150000},
-        ],
-    },
-    {
-        "clave": "accesos",
-        "nombre": "Accesos",
-        "unidad": "accesos",
-        "niveles": [
-            {"meta": 3, "premio": 100000},
-            {"meta": 4, "premio": 150000},
-            {"meta": 5, "premio": 200000},
-        ],
-    },
-    {
-        "clave": "pospagos",
-        "nombre": "Pospagos",
-        "unidad": "pospagos",
-        "niveles": [
-            {"meta": 10, "premio": 100000},
-            {"meta": 15, "premio": 200000},
-            {"meta": 20, "premio": 250000},
-            {"meta": 25, "premio": 300000},
-        ],
-    },
-    {
-        "clave": "terminales",
-        "nombre": "Terminales",
-        "unidad": "en ventas",
-        "niveles": [
-            {"meta": 30000000, "premio": 200000},
-            {"meta": 40000000, "premio": 350000},
-            {"meta": 50000000, "premio": 500000},
-        ],
-    },
+# Escala de premios por puntos (de mayor a menor). El premio puede ser un monto
+# en pesos (int) o el nombre de un producto (str).
+NIVELES = [
+    {"puntos": 100, "premio": 1000000},
+    {"puntos": 90, "premio": 900000},
+    {"puntos": 80, "premio": 800000},
+    {"puntos": 70, "premio": 700000},
+    {"puntos": 60, "premio": 500000},
+    {"puntos": 50, "premio": "Smartwatch Jincase"},
+    {"puntos": 45, "premio": "Smartwatch Honor"},
+    {"puntos": 40, "premio": "Audífonos Jincase"},
+    {"puntos": 30, "premio": "Tarjeta Adidas"},
 ]
 
-# Tipos de venta que suman al pote de Terminales (suma valor_equipo_claro)
-TIPOS_TERMINALES = [
+# Reglas de puntos por tipo de venta.
+PUNTOS_EQUIPO_BAJO = 1
+PUNTOS_EQUIPO_ALTO = 2
+UMBRAL_EQUIPO_ALTO = 1501000
+
+PUNTOS_DTH = 2
+PUNTOS_POSPAGO = 2
+PUNTOS_ACCESO = 3
+
+# Tipos de venta que corresponden a equipos (se puntúan por valor).
+TIPOS_EQUIPO = [
     "Kit Contado",
     "Kit a Cuotas",
     "Reposicion a Cuotas",
     "Reposicion cargo a la factura",
-    "Reposicion pago Inmediato",    
+    "Reposicion pago Inmediato",
+    "Tecnologia",
 ]
 
-# Nombre corto para columnas de la tabla resumen (clave -> columna)
-COLUMNAS_TABLA = {
-    "credismart": "Credismart",
-    "accesos": "Accesos",
+# Desglose de puntos para mostrar en pantalla (clave -> etiqueta).
+DESGLOSE_COLUMNAS = {
+    "equipos_1pt": "Eq. 1 pto",
+    "equipos_2pt": "Eq. 2 ptos",
+    "dth": "DTH",
     "pospagos": "Pospagos",
-    "terminales": "Terminales ($)",
+    "accesos": "Accesos",
 }
 
 
-def consultar_ventas_pdv(cliente, pdv):
-    """Consulta todas las ventas del PDV dentro del rango de la campaña.
+def consultar_ventas_asesor(cliente, cedula):
+    """Consulta todas las ventas del asesor dentro del rango de la campaña.
 
     Si viene fuera de rango o sin conexión, devuelve lista vacía.
     """
@@ -89,10 +73,10 @@ def consultar_ventas_pdv(cliente, pdv):
         respuesta = (
             cliente.table("ventas")
             .select(
-                "punto_venta, fecha_venta, tipo_venta, valor_equipo_claro, "
-                "financiera, acceso"
+                "cedula_vendedor, nombre_vendedor, fecha_venta, tipo_venta, "
+                "valor_equipo_claro, acceso"
             )
-            .eq("punto_venta", pdv)
+            .eq("cedula_vendedor", str(cedula))
             .gte("fecha_venta", FECHA_INICIO.isoformat())
             .lte("fecha_venta", FECHA_FIN.isoformat())
             .execute()
@@ -111,64 +95,79 @@ def consultar_ventas_pdv(cliente, pdv):
         return []
 
 
-def calcular_avance(ventas):
-    """Calcula el avance de la campaña para un PDV.
+def calcular_puntos(ventas):
+    """Calcula los puntos de la campaña para un conjunto de ventas.
 
-    Reglas (mismas que app.calcular_avance):
-      - POSPAGOS:  ventas tipo 'Postpago' (conteo)
-      - ACCESOS:   ventas 'Hogar' con acceso == 'SI'
-      - CREDISMART: ventas financiadas con la entidad 'Credismart'
-      - TERMINALES: suma de valor_equipo_claro de Kit/Reposicion/Tecnologia
-    Devuelve dict {credismart, accesos, pospagos, terminales}.
+    Reglas:
+      - Equipos con valor < $1.501.000: 1 punto.
+      - Equipos con valor >= $1.501.000: 2 puntos.
+      - DTH (Hogar sin acceso): 2 puntos.
+      - Pospagos: 2 puntos.
+      - Accesos (Hogar con acceso == 'SI'): 3 puntos.
+
+    Devuelve dict con el desglose y el total en la clave ``puntos``.
     """
-    avance = {"credismart": 0, "accesos": 0, "pospagos": 0, "terminales": 0}
+    desglose = {clave: 0 for clave in DESGLOSE_COLUMNAS}
     for venta in ventas:
         tv = venta.get("tipo_venta")
         if tv == "Postpago":
-            avance["pospagos"] += 1
+            desglose["pospagos"] += 1
         elif tv == "Hogar":
-            if venta.get("acceso") == "SI":
-                avance["accesos"] += 1
-        elif tv in TIPOS_TERMINALES:
+            if str(venta.get("acceso") or "").strip().upper() == "SI":
+                desglose["accesos"] += 1
+            else:
+                desglose["dth"] += 1
+        elif tv in TIPOS_EQUIPO:
             try:
-                avance["terminales"] += float(venta.get("valor_equipo_claro") or 0)
+                valor = float(venta.get("valor_equipo_claro") or 0)
             except (TypeError, ValueError):
-                pass
-        if str(venta.get("financiera") or "").strip().upper() == "CREDISMART":
-            avance["credismart"] += 1
-    return avance
+                valor = 0
+            if valor >= UMBRAL_EQUIPO_ALTO:
+                desglose["equipos_2pt"] += 1
+            elif valor > 0:
+                desglose["equipos_1pt"] += 1
+
+    desglose["puntos"] = (
+        desglose["equipos_1pt"] * PUNTOS_EQUIPO_BAJO
+        + desglose["equipos_2pt"] * PUNTOS_EQUIPO_ALTO
+        + desglose["dth"] * PUNTOS_DTH
+        + desglose["pospagos"] * PUNTOS_POSPAGO
+        + desglose["accesos"] * PUNTOS_ACCESO
+    )
+    return desglose
 
 
-def _formatear_premio(monto):
-    """Formatea un premio en pesos colombianos (ej. $100.000)."""
-    return f"${int(monto):,}".replace(",", ".")
+def nivel_alcanzado(puntos):
+    """Devuelve el nivel de premio más alto alcanzado (o None)."""
+    for nivel in NIVELES:
+        if puntos >= nivel["puntos"]:
+            return nivel
+    return None
 
 
-def _formatear_meta(cat, meta):
-    """Formatea una meta según la categoría (porcentaje o dinero)."""
-    if cat == "terminales":
-        return f"${int(meta):,}".replace(",", ".")
-    return f"{int(meta)}"
+def siguiente_nivel(puntos):
+    """Devuelve el siguiente nivel por alcanzar (o None si ya es el máximo)."""
+    pendientes = [n for n in NIVELES if puntos < n["puntos"]]
+    return pendientes[-1] if pendientes else None
 
 
-def render_meta_volante(cliente, pdv, nombre_pdv):
-    """Muestra el tracking de la Meta Volante para el PDV seleccionado.
+def formatear_premio(premio):
+    """Formatea un premio: monto en pesos o nombre de producto."""
+    if isinstance(premio, (int, float)):
+        return f"${int(premio):,}".replace(",", ".")
+    return str(premio)
 
-    Llamada desde app.py tras elegir PDV (pantalla intermedia). Si hoy está
-    fuera del rango de la campaña, muestra un aviso y no renderiza.
-    """
-    hoy = datetime.date.today()
 
-    st.markdown("<div style='height: 30px;'></div>", unsafe_allow_html=True)
+def _encabezado(titulo, subtitulo):
     st.markdown(
         f"""
         <div style="text-align:center; padding:24px; border:2px solid #DA291C;
                     border-radius:12px; background:linear-gradient(135deg,#FFF0EF,#FFFFFF);">
             <div style="font-size:30px; font-weight:bold; color:#DA291C;">
-                🏆 {NOMBRE_CAMPANA}
+                🏆 {titulo}
             </div>
             <div style="font-size:18px; color:#DA291C; margin-top:4px;">
-                {SUBTITULO_CAMPANA}
+                {subtitulo}
             </div>
             <div style="font-size:15px; color:#666; margin-top:10px;">
                 Del {FECHA_INICIO.day} al {FECHA_FIN.day} de {MES_CAMPANA}
@@ -181,6 +180,40 @@ def render_meta_volante(cliente, pdv, nombre_pdv):
         unsafe_allow_html=True,
     )
 
+
+def _tabla_niveles(puntos):
+    """Tabla con la escala de premios y el estado de cada nivel."""
+    filas = []
+    for nivel in NIVELES:
+        cumplido = puntos >= nivel["puntos"]
+        filas.append({
+            "Puntos": nivel["puntos"],
+            "Premio": formatear_premio(nivel["premio"]),
+            "Estado": "✓ Alcanzado" if cumplido else "Pendiente",
+        })
+    st.dataframe(
+        pd.DataFrame(filas),
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Puntos": st.column_config.NumberColumn("Puntos"),
+            "Premio": st.column_config.TextColumn("Premio"),
+            "Estado": st.column_config.TextColumn("Estado"),
+        },
+    )
+
+
+def render_meta_volante(cliente, cedula, nombre_asesor):
+    """Muestra el tracking de la Meta Volante para el asesor logueado.
+
+    Llamada desde app.py tras elegir PDV (pantalla intermedia). Si hoy está
+    fuera del rango de la campaña, muestra un aviso y no renderiza.
+    """
+    hoy = datetime.date.today()
+
+    st.markdown("<div style='height: 30px;'></div>", unsafe_allow_html=True)
+    _encabezado(NOMBRE_CAMPANA, SUBTITULO_CAMPANA)
+
     if hoy < FECHA_INICIO or hoy > FECHA_FIN:
         st.info("📅 La campaña Meta Volante no está activa en esta fecha.")
         return
@@ -188,81 +221,72 @@ def render_meta_volante(cliente, pdv, nombre_pdv):
     st.markdown(
         f"""
         <div class="nombre-vendedor" style="margin-top:18px;">
-            📍 Punto de Venta: {nombre_pdv} ({pdv})
+            👤 Asesor: {nombre_asesor} ({cedula})
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    ventas_pdv = consultar_ventas_pdv(cliente, pdv)
-    avance = calcular_avance(ventas_pdv)
+    ventas_asesor = consultar_ventas_asesor(cliente, cedula)
+    desglose = calcular_puntos(ventas_asesor)
+    puntos = desglose["puntos"]
 
     st.markdown("---")
 
-    for cat in CATEGORIAS:
-        clave = cat["clave"]
-        valor = avance[clave]
+    col_puntos, col_premio = st.columns([1, 1])
+    with col_puntos:
+        st.metric("PUNTOS ACUMULADOS", f"{puntos}")
+    with col_premio:
+        nivel = nivel_alcanzado(puntos)
+        if nivel is not None:
+            st.metric("PREMIO ACTUAL", formatear_premio(nivel["premio"]))
+        else:
+            minimo = NIVELES[-1]["puntos"]
+            st.metric("PREMIO ACTUAL", "Sin premio", help=f"Necesitas al menos {minimo} puntos")
 
-        # Nivel más alto alcanzado
-        niveles_alcanzados = [n for n in cat["niveles"] if valor >= n["meta"]]
-        nivel_max = niveles_alcanzados[-1] if niveles_alcanzados else None
-        ganado = nivel_max is not None and nivel_max is cat["niveles"][-1]
+    progreso = min(puntos / 100, 1.0)
+    st.progress(progreso)
 
-        with st.container(border=True):
-            col_t, col_v = st.columns([4, 2])
-            with col_t:
-                st.markdown(f"### {cat['nombre']}")
-                if cat["clave"] == "terminales":
-                    st.metric(
-                        "Avance",
-                        f"${int(valor):,}".replace(",", "."),
-                        help=f"Meta máxima: {_formatear_meta(clave, cat['niveles'][-1]['meta'])} en ventas",
-                    )
-                else:
-                    st.metric(
-                        "Avance",
-                        f"{int(valor)} {cat['unidad']}",
-                        help=f"Meta máxima: {_formatear_meta(clave, cat['niveles'][-1]['meta'])} {cat['unidad']}",
-                    )
-            with col_v:
-                if ganado:
-                    st.success("🏁 **Ganado**\n\n¡Meta máxima alcanzada!")
-                elif nivel_max:
-                    premio = _formatear_premio(nivel_max["premio"])
-                    st.info(f"**Hasta {premio} alcanzado**")
-                else:
-                    st.warning("Sigue esforzándote 💪")
+    cercano = siguiente_nivel(puntos)
+    if cercano is not None:
+        faltan = cercano["puntos"] - puntos
+        st.caption(
+            f"Te faltan **{faltan} puntos** para alcanzar "
+            f"**{formatear_premio(cercano['premio'])}** ({cercano['puntos']} puntos)."
+        )
+    else:
+        st.success("🏁 ¡Nivel máximo alcanzado!")
 
-            # Niveles de premio
-            filas = []
-            for n in cat["niveles"]:
-                cumplido = valor >= n["meta"]
-                filas.append({
-                    "Meta": _formatear_meta(clave, n["meta"]),
-                    "Premio": _formatear_premio(n["premio"]),
-                    "Estado": "✓ Cumplida" if cumplido else "Pendiente",
-                })
-            st.dataframe(
-                pd.DataFrame(filas),
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "Meta": st.column_config.TextColumn("Meta"),
-                    "Premio": st.column_config.TextColumn("Premio"),
-                    "Estado": st.column_config.TextColumn("Estado"),
-                },
-            )
+    st.markdown("### 🎯 Puntos por tipo de venta")
+    st.markdown(
+        f"""
+        - Equipos menores a $1.500.000: **{PUNTOS_EQUIPO_BAJO} punto**
+        - Equipos mayores a $1.501.000: **{PUNTOS_EQUIPO_ALTO} puntos**
+        - DTH: **{PUNTOS_DTH} puntos**
+        - Pospagos: **{PUNTOS_POSPAGO} puntos**
+        - Accesos: **{PUNTOS_ACCESO} puntos**
+        """
+    )
+
+    resumen = pd.DataFrame([{
+        DESGLOSE_COLUMNAS[clave]: desglose[clave]
+        for clave in DESGLOSE_COLUMNAS
+    }])
+    st.dataframe(resumen, use_container_width=True, hide_index=True)
+
+    st.markdown("### 🏆 Escala de premios")
+    _tabla_niveles(puntos)
 
     st.markdown("---")
-    st.caption(f"Ventas registradas en el PDV durante la campaña: **{len(ventas_pdv)}**")
+    st.caption(f"Ventas registradas por el asesor durante la campaña: **{len(ventas_asesor)}**")
 
 
-def resultados_meta_volante(cliente, pdv_disponibles):
+def resultados_meta_volante(cliente, asesores):
     """Muestra los resultados finales de la campaña para los administradores.
 
-    Tabla resumen con TODOS los puntos de venta (los que no registraron ventas
-    en la campaña aparecen con avance 0) y bloque de ganadores por ítem.
-    Solo se muestra cuando la campaña ya terminó (hoy > FECHA_FIN).
+    Tabla con TODOS los asesores (los que no registraron ventas en la campaña
+    aparecen con 0 puntos) y bloque de ganadores. Solo se muestra cuando la
+    campaña ya terminó (hoy > FECHA_FIN).
     """
     hoy = datetime.date.today()
 
@@ -288,107 +312,79 @@ def resultados_meta_volante(cliente, pdv_disponibles):
         return
 
     respuesta = cliente.table("ventas").select(
-        "punto_venta, fecha_venta, tipo_venta, valor_equipo_claro, financiera, acceso"
+        "cedula_vendedor, nombre_vendedor, fecha_venta, tipo_venta, "
+        "valor_equipo_claro, acceso"
     ).gte("fecha_venta", FECHA_INICIO.isoformat()).lte("fecha_venta", FECHA_FIN.isoformat()).execute()
     ventas_totales = respuesta.data or []
 
-    avance_por_pdv = {}
-    total_por_pdv = {}
+    ventas_por_asesor = {}
     for v in ventas_totales:
-        pdv = v.get("punto_venta")
-        if not pdv:
+        cedula = str(v.get("cedula_vendedor") or "").strip()
+        if not cedula:
             continue
-        avance_por_pdv.setdefault(pdv, []).append(v)
-        total_por_pdv[pdv] = len(avance_por_pdv[pdv])
+        ventas_por_asesor.setdefault(cedula, []).append(v)
 
-    # Ganancias por PDV (premio del nivel máx alcanzado por categoría)
-    premios_por_pdv = {}
-    ganador_por_cat = {}
-    for cat in CATEGORIAS:
-        cl = cat["clave"]
-        mejor_valor = 0
-        mejor_pdv = None
-        for pdv, ventas_pdv in avance_por_pdv.items():
-            av = calcular_avance(ventas_pdv)
-            if av[cl] > mejor_valor:
-                mejor_valor = av[cl]
-                mejor_pdv = pdv
-        ganador_por_cat[cl] = {"pdv": mejor_pdv, "valor": mejor_valor}
-        if mejor_pdv is not None:
-            alcanzados = [n for n in cat["niveles"] if mejor_valor >= n["meta"]]
-            if alcanzados:
-                premios_por_pdv.setdefault(mejor_pdv, {})[cl] = alcanzados[-1]["premio"]
+    # Asegurar que aparezcan todos los asesores registrados, aunque no vendan.
+    for cedula in asesores:
+        ventas_por_asesor.setdefault(str(cedula).strip(), [])
 
-    # ===== Bloque de ganadores por categoría =====
-    st.markdown("### 🎖️ Ganadores por Categoría")
-    cols = st.columns(len(CATEGORIAS))
-    for col, cat in zip(cols, CATEGORIAS):
-        cl = cat["clave"]
-        g = ganador_por_cat[cl]
-        meta_minima = cat["niveles"][0]["meta"]
-        sin_ganador = g["pdv"] is None or g["valor"] < meta_minima
-        with col:
-            if sin_ganador:
-                st.metric(f"{cat['nombre']}", "Sin ganador", help="Nadie logró la meta mínima")
-            else:
-                nombre = pdv_disponibles.get(g["pdv"], g["pdv"])
-                premio = premios_por_pdv.get(g["pdv"], {}).get(cl, 0)
-                if cat["clave"] == "terminales":
-                    valor_str = f"${int(g['valor']):,}".replace(",", ".")
-                else:
-                    valor_str = f"{int(g['valor'])}"
-                st.metric(
-                    label=f"🏆 {cat['nombre']}",
-                    value=f"{nombre}",
-                    delta=valor_str,
-                    help=f"Premio: {_formatear_premio(premio)}" if premio else "Sin premio",
-                )
-
-    # ===== Tabla resumen general (todos los PDVs) =====
-    st.markdown("### 📊 Resumen por Punto de Venta")
+    minimo = NIVELES[-1]["puntos"]
 
     filas = []
-    for pdv in pdv_disponibles:
-        nombre = pdv_disponibles[pdv]
-        ventas_pdv = avance_por_pdv.get(pdv, [])
-        av = calcular_avance(ventas_pdv)
-        premio_total = sum(premios_por_pdv.get(pdv, {}).values())
-        ganador_cats = []
-        for cat in CATEGORIAS:
-            g = ganador_por_cat[cat["clave"]]
-            if g["pdv"] == pdv and g["valor"] >= cat["niveles"][0]["meta"]:
-                ganador_cats.append(cat["nombre"])
-        fila_row = {
-            "Código": pdv,
-            "PDV": nombre,
-            "Ventas": len(ventas_pdv),
+    for cedula, ventas_asesor in ventas_por_asesor.items():
+        desglose = calcular_puntos(ventas_asesor)
+        puntos = desglose["puntos"]
+        nivel = nivel_alcanzado(puntos)
+        nombre = asesores.get(cedula)
+        if not nombre:
+            nombres_venta = [v.get("nombre_vendedor") for v in ventas_asesor if v.get("nombre_vendedor")]
+            nombre = nombres_venta[0] if nombres_venta else "Sin nombre"
+        fila = {
+            "CC": cedula,
+            "Asesor": nombre,
+            "Ventas": len(ventas_asesor),
         }
-        for cat in CATEGORIAS:
-            cl = cat["clave"]
-            if cl == "terminales":
-                fila_row["Terminales ($)"] = int(av["terminales"])
-            else:
-                fila_row[COLUMNAS_TABLA[cl]] = av[cl]
-        fila_row["Premios ($)"] = premio_total
-        fila_row["Ganador"] = ", ".join(ganador_cats)
-        filas.append(fila_row)
+        for clave, etiqueta in DESGLOSE_COLUMNAS.items():
+            fila[etiqueta] = desglose[clave]
+        fila["Puntos"] = puntos
+        fila["Premio"] = formatear_premio(nivel["premio"]) if nivel else "Sin premio"
+        fila["Ganador"] = "Sí" if nivel else "No"
+        filas.append(fila)
+
+    if not filas:
+        st.info("No hay asesores ni ventas registradas para esta campaña.")
+        return
 
     df_res = pd.DataFrame(filas)
-    cols_orden = ["Ventas"] + [COLUMNAS_TABLA[c["clave"]] for c in CATEGORIAS]
-    df_res = df_res.sort_values(cols_orden, ascending=False, ignore_index=True)
+    df_res = df_res.sort_values(["Puntos", "Ventas"], ascending=False, ignore_index=True)
+
+    # ===== Bloque de ganadores =====
+    ganadores = df_res[df_res["Puntos"] >= minimo] if not df_res.empty else df_res
+    st.markdown("### 🎖️ Ganadores")
+    if ganadores.empty:
+        st.info(f"Ningún asesor alcanzó el mínimo de {minimo} puntos.")
+    else:
+        cols = st.columns(min(len(ganadores), 3))
+        for col, (_, fila) in zip(cols, ganadores.head(3).iterrows()):
+            with col:
+                st.metric(
+                    label=f"🏆 {fila['Asesor']}",
+                    value=f"{int(fila['Puntos'])} puntos",
+                    delta=fila["Premio"],
+                    help=f"CC: {fila['CC']}",
+                )
+
+    # ===== Tabla resumen general (todos los asesores) =====
+    st.markdown("### 📊 Resumen por Asesor")
 
     def resaltar_ganador(fila):
-        return ["background-color: #E8F5E9; font-weight: bold;" if fila["Ganador"] else "" for _ in fila]
+        return ["background-color: #E8F5E9; font-weight: bold;" if fila["Ganador"] == "Sí" else "" for _ in fila]
 
-    df_estilo = (
-        df_res.style
-        .apply(resaltar_ganador, axis=1)
-        .format(
-            {"Terminales ($)": lambda x: f"${int(x):,}".replace(",", "."),
-             "Premios ($)": lambda x: f"${int(x):,}".replace(",", ".")},
-            na_rep="$0",
-        )
-    )
+    df_estilo = df_res.style.apply(resaltar_ganador, axis=1)
     st.dataframe(df_estilo, use_container_width=True, hide_index=True)
 
-    st.caption("🏁 Los PDV que ganaron al menos un ítem se resaltan en verde. Regla: termina por ítem apenas el primer punto de venta logre la meta máxima de cada uno. Los PDVs sin registro en la campaña aparecen con 0.")
+    st.caption(
+        f"🏁 Se resaltan en verde los asesores que alcanzaron al menos {minimo} puntos. "
+        "El premio corresponde al nivel más alto alcanzado (no acumulativo). "
+        "Los asesores sin registro en la campaña aparecen con 0 puntos."
+    )
