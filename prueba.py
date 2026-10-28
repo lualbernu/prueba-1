@@ -401,7 +401,6 @@ pdv_disponibles = {
     "QUIP":"QUIPAMA",
     "RAQU":"RAQUIRA",
     "SAMA":"SAMACA",
-    "SANT":"SANTANA",
     "SOGA":"SOGAMOSO",
     "STAS":"SANTA SOFIA",
     "TIBA":"TIBANA",
@@ -525,8 +524,8 @@ if supabase is not None and not st.session_state.meta_volante_visto:
         from meta_volante import render_meta_volante
         render_meta_volante(
             supabase,
-            st.session_state.pdv_seleccionado,
-            pdv_disponibles.get(st.session_state.pdv_seleccionado, st.session_state.pdv_seleccionado),
+            st.session_state.usuario_logueado,
+            st.session_state.nombre_vendedor,
         )
         if st.button("✅ Entrar a la app", type="primary", use_container_width=True):
             st.session_state.meta_volante_visto = True
@@ -1206,7 +1205,7 @@ with tab_historial:
             if supabase is not None:
                 try:
                     from meta_volante import resultados_meta_volante
-                    resultados_meta_volante(supabase, pdv_disponibles)
+                    resultados_meta_volante(supabase, dict_asesores)
                 except ImportError:
                     pass
 
